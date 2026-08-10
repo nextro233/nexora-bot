@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+nexora.db
+nexora.db-*
+bot_data.db
+*.log
+.DS_Store
+venv/
+.venv/
