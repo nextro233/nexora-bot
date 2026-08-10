@@ -39,21 +39,29 @@ async def admin_panel(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-@router.message(F.text.startswith("/deliver "), F.from_user.id == ADMIN_ID)
+@router.message(F.text.startswith("/deliver"), F.from_user.id == ADMIN_ID)
 async def deliver_config(message: types.Message):
-    """Admin command: /deliver <order_id> then sends the VLESS link in next message"""
-    parts = message.text.split(maxsplit=1)
+    """Admin command: /deliver <order_id> [link] — one-step or two-step delivery"""
+    parts = message.text.split(maxsplit=2)
+    # parts[0]=/deliver, parts[1]=order id, parts[2]=optional link
+    
     if len(parts) < 2:
-        await message.answer("فرمت: `/deliver {order_id}`\nمثال: `/deliver 5`", parse_mode="Markdown")
+        await message.answer(
+            "📦 **تحویل کانفیگ**\n\n"
+            "دو روش:\n"
+            "1️⃣ دو مرحله‌ای: `/deliver 2` بعد لینک رو بفرست\n"
+            "2️⃣ یکجا: `/deliver 2 vless://...`\n\n"
+            "هر دوتاش کار می‌کنه 👌",
+            parse_mode="Markdown"
+        )
         return
     
     order_id_str = parts[1].strip()
     if not order_id_str.isdigit():
-        await message.answer("❌ شناسه سفارش باید عدد باشد.")
+        await message.answer("❌ شناسه سفارش باید عدد باشه. مثال: `/deliver 2`", parse_mode="Markdown")
         return
     
     order_id = int(order_id_str)
-    order = None
     from app.database import get_conn
     with get_conn() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
@@ -62,22 +70,51 @@ async def deliver_config(message: types.Message):
         await message.answer(f"❌ سفارش #{order_id} یافت نشد.")
         return
     
-    from aiogram.fsm.context import FSMContext
-    from aiogram.fsm.state import StatesGroup, State
+    # If link was also provided, deliver immediately (one-step)
+    if len(parts) >= 3:
+        vless_link = parts[2].strip()
+        if not vless_link.startswith(("vless://", "vmess://", "trojan://", "ss://", "hysteria://")):
+            # maybe it's the whole rest of the line minus command
+            rest = message.text.split(None, 1)[1].strip()  # "2 <link>"
+            vless_link = rest.split(None, 1)[1].strip() if " " in rest else ""
+            if not vless_link.startswith(("vless://", "vmess://", "trojan://", "ss://", "hysteria://")):
+                await message.answer("⚠️ لینک معتبر نیست. لینکی که با vless:// شروع می‌شه بفرست.")
+                return
+        await _send_config_to_user(message, order, vless_link)
+        await message.answer(f"✅ کانفیگ سفارش #{order_id} ارسال شد!")
+        return
     
-    # Store pending delivery in memory for next message
-    # Simple approach: save order id for the next message handler
+    # Two-step: store and ask for link
     await message.answer(
         f"🛠 **کانفیگ برای سفارش #{order_id}**\n"
         f"کاربر: `{order['telegram_id']}` | {order['plan_gb']} گیگابایت\n\n"
-        f"حالا **لینک VLESS** را بفرستید تا برای کاربر ارسال شود.\n"
+        f"حالا **لینک VLESS** رو بفرست تا بره برای کاربر.\n"
         f"(یا /cancel_delivery برای انصراف)",
         parse_mode="Markdown"
     )
-    # Store in a module-level dict
     _pending_deliveries[message.from_user.id] = order_id
 
 _pending_deliveries: dict = {}
+
+
+async def _send_config_to_user(message: types.Message, order, vless_link: str):
+    """Send the VLESS config to the customer and mark order as delivered."""
+    from app.instances import bot
+    user_id = order["telegram_id"]
+    await bot.send_message(
+        user_id,
+        f"🚀 **کانفیگ شما آماده است!**\n\n"
+        f"🔗 **لینک اتصال (VLESS):**\n`{vless_link}`\n\n"
+        f"📦 حجم: {order['plan_gb']} گیگابایت\n\n"
+        f"💡 *برای اتصال از اپ v2rayNG (اندروید) یا V2Box (آیفون) استفاده کنید.*\n\n"
+        f"✅ اگر پرداخت رو انجام دادید، دکمه «پرداخت انجام شد» رو بزنید.",
+        parse_mode="Markdown"
+    )
+    # Mark order as delivered
+    from app.database import get_conn
+    with get_conn() as conn:
+        conn.execute("UPDATE orders SET status='delivered' WHERE id=?", (order["id"],))
+        conn.commit()
 
 
 @router.message(F.from_user.id == ADMIN_ID)
@@ -109,10 +146,15 @@ async def catch_delivery_link(message: types.Message):
         f"🚀 **کانفیگ شما آماده است!**\n\n"
         f"🔗 **لینک اتصال (VLESS):**\n`{vless_link}`\n\n"
         f"📦 حجم: {order['plan_gb']} گیگابایت\n\n"
-        f"💡 *توصیه:* بهتر است بسته خود را برای **۳۰ روز** استفاده کنید. اگر قبل از ۳۰ روز حجم تمام شد، به پشتیبانی اطلاع دهید.*\n\n"
-        f"✅ اگر پرداخت را انجام داده‌اید، از دکمه «پرداخت انجام شد» استفاده کنید تا سرویس ثبت شود.",
+        f"💡 *برای اتصال از اپ v2rayNG (اندروید) یا V2Box (آیفون) استفاده کنید.*\n\n"
+        f"✅ اگر پرداخت رو انجام دادید، دکمه «پرداخت انجام شد» رو بزنید.",
         parse_mode="Markdown"
     )
+    # Mark order as delivered
+    from app.database import get_conn
+    with get_conn() as conn:
+        conn.execute("UPDATE orders SET status='delivered' WHERE id=?", (order_id,))
+        conn.commit()
     await message.answer(f"✅ کانفیگ برای سفارش #{order_id} ارسال شد!")
 
 
