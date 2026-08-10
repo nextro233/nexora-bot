@@ -11,6 +11,7 @@ import tempfile
 import time
 from datetime import datetime
 
+import aiohttp
 from app import config
 
 # GitHub backup repo (private). Configure via env GITHUB_BACKUP_REPO.
@@ -41,10 +42,10 @@ def export_db_to_sql_json() -> dict:
 
 def make_backup_bytes() -> bytes:
     """Produce a .db backup file (SQLite VACUUM INTO)."""
-    tmp = tempfile.mktemp(suffix=".db")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        tmp = f.name
     try:
         conn = sqlite3.connect(DB_PATH)
-        # VACUUM INTO creates a consistent snapshot copy
         conn.execute(f"VACUUM INTO '{tmp}'")
         conn.close()
         with open(tmp, "rb") as f:
@@ -55,7 +56,7 @@ def make_backup_bytes() -> bytes:
 
 
 async def upload_to_github(payload: str, filename: str) -> bool:
-    """Upload a file to the private backup repo via GitHub Contents API."""
+    """Upload a file to the private backup repo via GitHub Contents API (async)."""
     if not GITHUB_TOKEN:
         return False
 
@@ -69,34 +70,32 @@ async def upload_to_github(payload: str, filename: str) -> bool:
         "User-Agent": "nexora-backup",
     }
 
-    # Check if file exists to get its sha (required for update)
-    sha = None
-    try:
-        import urllib.request
-        req = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-            sha = data.get("sha")
-    except Exception:
-        pass  # 404 = new file
+    async with aiohttp.ClientSession() as session:
+        sha = None
+        # Check if file exists (to get sha for update)
+        try:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    sha = data.get("sha")
+        except Exception:
+            pass  # 404 = new file
 
-    body = {"message": f"backup {filename}", "content": content_b64}
-    if sha:
-        body["sha"] = sha
+        body = {"message": f"backup {filename}", "content": content_b64}
+        if sha:
+            body["sha"] = sha
 
-    import urllib.request
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode(),
-        headers={**headers, "Content-Type": "application/json"},
-        method="PUT",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return resp.status in (200, 201)
-    except Exception as e:
-        print(f"GitHub upload failed: {e}")
-        return False
+        try:
+            async with session.put(
+                url,
+                json=body,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=20)
+            ) as resp:
+                return resp.status in (200, 201)
+        except Exception as e:
+            print(f"GitHub upload failed: {e}")
+            return False
 
 
 async def send_backup_to_admin() -> str:
