@@ -13,6 +13,15 @@ async def cmd_start(message: types.Message):
         first_name=message.from_user.first_name or ""
     )
     
+    # Handle deep-link args: /start bought_<order_id>
+    args = message.get_args()
+    if args and args.startswith("bought_"):
+        order_id_str = args[5:].split("_")[0]
+        if order_id_str.isdigit():
+            order_id = int(order_id_str)
+            await _show_order_receipt(message, order_id)
+            return
+    
     welcome_text = (
         f"👋 سلام {message.from_user.first_name} عزیز!\n\n"
         f"به **NEXORA VPN** خوش آمدید ⚡\n\n"
@@ -55,5 +64,56 @@ async def cmd_help_connect(message: types.Message):
         "💻 **ویندوز (Windows):**\n"
         "برنامه پیشنهادی: `v2rayN` یا `NekoBox`\n\n"
         "💡 *توصیه:* بسته‌های حجمی را طوری مدیریت کنید که در ۳۰ روز استفاده شوند."
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+async def _show_order_receipt(message: types.Message, order_id: int):
+    """Show the customer's order receipt (like @StarziFyReport style)."""
+    order = database.get_order(order_id)
+    if not order or order["telegram_id"] != message.from_user.id:
+        await message.answer("❌ سفارش یافت نشد یا متعلق به شما نیست.")
+        return
+
+    from app.database import get_conn
+    with get_conn() as conn:
+        services = conn.execute(
+            "SELECT * FROM services WHERE order_id=? ORDER BY id DESC LIMIT 1",
+            (order_id,)
+        ).fetchone()
+
+    user = database.get_user(order["telegram_id"])
+    username = f"@{user['username']}" if user and user["username"] else "—"
+    first = user["first_name"] if user else "—"
+
+    status_map = {
+        "pending": "🟡 در انتظار پرداخت",
+        "paid": "🟢 پرداخت تأیید شده",
+        "delivered": "📦 تحویل شده (در انتظار نهایی)",
+        "active": "✅ فعال",
+        "cancelled": "❌ لغو شده",
+    }
+
+    svc = services
+    expiry = ""
+    if svc and svc.get("expires_at"):
+        expiry = f"\n⏰ منقضی: {svc['expires_at'][:10]}"
+
+    text = (
+        f"🧾 **رسید خرید NEXORA**\n"
+        f"═══════════════════\n"
+        f"👤 مشتری: {first} ({username})\n"
+        f"🆔 آیدی: `{order['telegram_id']}`\n"
+        f"🧾 شماره سفارش: #{order['id']}\n"
+        f"📅 تاریخ: {order['created_at'][:10]}\n\n"
+        f"📦 بسته: {order['plan_gb']} گیگابایت\n"
+        f"⭐ قیمت: {order['price_stars']} استارز\n"
+        f"💵 معادل: {order['price_toman']:,} تومان\n"
+        f"📌 وضعیت: {status_map.get(order['status'], order['status'])}\n"
+        f"{expiry}\n\n"
+        f"🔗 لینک‌های مرتبط:\n"
+        f"• کانال ما: https://t.me/YourBotUsername\n"
+        f"• پشتیبانی: https://t.me/YourBotUsername\n\n"
+        f"💡 برای استفاده از این لینک، به ربات بازگردید و از منوی «📊 سرویس من / وضعیت» استفاده کنید."
     )
     await message.answer(text, parse_mode="Markdown")

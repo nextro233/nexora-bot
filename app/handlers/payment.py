@@ -85,31 +85,39 @@ async def handle_successful_payment(message: types.Message):
     # Mark as paid with the real charge id
     database.set_order_status(order_id, "paid", payment_charge_id=charge_id)
 
+    # Cancel the pending 5-min grace timer (payment succeeded)
+    try:
+        from app.scheduler import scheduler
+        job_id = f"grace_{order_id}"
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+    except Exception:
+        pass  # scheduler not started or job not found — not critical
+
     # Confirm to the customer
     await message.answer(
         f"✅ **پرداخت با موفقیت انجام شد!**\n\n"
         f"🧾 سفارش #{order_id} | {order['plan_gb']} گیگابایت\n"
         f"⭐ مبلغ: **{stars_amount} استارز**\n\n"
-        f"🛠 در حال آماده‌سازی کانفیگ شما هستیم — به‌زودی ارسال می‌شود.\n"
-        f"معمولاً چند دقیقه طول می‌کشد.",
+        f"🛠 کانفیگ شما تحویل داده شده و در حال فعال‌سازی نهایی است.\n"
+        f"💡 در صورت مشکل در اتصال، از «📩 گزارش مشکل / پشتیبانی» استفاده کنید.",
         parse_mode="Markdown"
     )
 
-    # Notify admin with REAL payment proof
+    # Notify admin: real payment confirmed → config already delivered
     user = message.from_user
     username = f"@{user.username}" if user.username else "—"
     try:
         from app.instances import bot
         await bot.send_message(
             config.ADMIN_ID,
-            f"💰 **پرداخت واقعی استارز دریافت شد!**\n\n"
-            f"🧾 سفارش #{order_id} | {order['plan_gb']} گیگابایت\n"
-            f"⭐ مبلغ: **{stars_amount} XTR (استارز)**\n"
-            f"🆔 Charge ID: `{charge_id}`\n\n"
+            f"✅ **پرداخت تأیید شد — سفارش #{order_id}**\n\n"
             f"👤 مشتری: {user.first_name} ({username})\n"
-            f"🆔 آیدی: `{user.id}`\n\n"
-            f"⚙️ حالا کانفیگ را بسازید و تحویل دهید:\n"
-            f"`/deliver {order_id}`",
+            f"🆔 آیدی: `{user.id}`\n"
+            f"⭐ مبلغ: **{stars_amount} XTR**\n"
+            f"🆔 Charge ID: `{charge_id}`\n\n"
+            f"⚙️ کانفیگ قبلاً تحویل داده شده.\n"
+            f"اگر فعال نشد، از `/order {order_id}` برای بررسی وضعیت استفاده کنید.",
             parse_mode="Markdown"
         )
     except Exception as e:

@@ -17,6 +17,11 @@ FREE_TEST_MB = int(os.getenv("FREE_TEST_MB", "50"))
 BASE_PRICE_PER_GB = int(os.getenv("BASE_PRICE_PER_GB", "5000"))
 VOLUME_ALERT_THRESHOLD_GB = float(os.getenv("VOLUME_ALERT_THRESHOLD_GB", "100.0"))
 
+# Railway free-plan expiry tracking — set this in Railway Variables once deployed.
+# Format: ISO datetime string, e.g. "2026-08-10T15:00:00+00:00"
+# If not set, the scheduler falls back to the first order's created_at date.
+RAILWAY_DEPLOY_START = os.getenv("RAILWAY_DEPLOY_START", "")
+
 # Price packages with marketing discounts
 # Basis: 1 Star ≈ 5,550 toman (100 Stars = $3 = 555,000 toman at 185k rate)
 STAR_TO_TOMAN = 5550

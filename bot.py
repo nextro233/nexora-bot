@@ -35,8 +35,9 @@ dp.include_router(support.router)
 dp.include_router(admin.router)
 
 async def main():
-    from app.database import init_db
+    from app.database import init_db, migrate_schema
     init_db()
+    migrate_schema()
     start_scheduler()
     print("🤖 NEXORA Bot started!")
     # Delete webhook in case set
