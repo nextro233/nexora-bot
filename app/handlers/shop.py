@@ -48,16 +48,17 @@ async def handle_buy_plan(callback: types.CallbackQuery):
     # Notify admin about the new order
     await _notify_admin(callback, order_id, plan)
     
-    # Payment buttons
+    # Payment buttons — real Stars invoice
     pm_kb = payment_methods_keyboard(order_id, plan["stars"])
     await callback.message.answer(
-        f"💳 **درگاه پرداخت استارز**\n\n"
+        f"💳 **پرداخت با استارز تلگرام**\n\n"
         f"سفارش #{order_id} | {plan['gb']} گیگابایت\n"
         f"مبلغ قابل پرداخت: **{plan['stars']} استارز**\n\n"
-        f"1️⃣ استارز را از منابع معتبر تهیه کنید\n"
-        f"2️⃣ پرداخت را انجام دهید\n"
-        f"3️⃣ دکمه «پرداخت انجام شد» را بزنید\n"
-        f"4️⃣ ادمین کانفیگ را برای شما ارسال می‌کند",
+        f"1️⃣ روی «⭐️ پرداخت با استارز» بزنید\n"
+        f"2️⃣ فاکتور رسمی تلگرام باز می‌شود\n"
+        f"3️⃣ پرداخت را در تلگرام تأیید کنید\n"
+        f"4️⃣ به محض تأیید پرداخت، ادمین کانفیگ را می‌فرستد ✅\n\n"
+        f"🔒 *پرداخت مستقیم توسط تلگرام تأیید می‌شود — هیچ ادعای دستی‌ای لازم نیست.*",
         reply_markup=pm_kb, parse_mode="Markdown"
     )
     await callback.answer()

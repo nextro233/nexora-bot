@@ -45,10 +45,10 @@ async def handle_ticket_message(message: types.Message, state: FSMContext):
         await bot.send_message(
             config.ADMIN_ID,
             f"🎫 **تیکت جدید #{ticket_id}**\n\n"
-            f"👤 کاربر: {message.from_user.id}\n"
+            f"👤 کاربر: `{message.from_user.id}`\n"
             f"👤 نام: {message.from_user.first_name}\n"
             f"📝 متن:\n{message.text}\n\n"
-            f"برای پاسخ، به این کاربر در تلگرام پیام دهید.",
+            f"💬 **پاسخ مستقیم:**\n`/reply {message.from_user.id} متن پاسخ شما`",
             parse_mode="Markdown"
         )
     except Exception as e:

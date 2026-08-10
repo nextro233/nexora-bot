@@ -1,8 +1,9 @@
+import asyncio
+import logging
+from datetime import datetime, timedelta
 from aiogram import Router, F, types
-from aiogram.fsm.context import FSMContext
 from app import database, config
 from app.services.sulgx import sulgx_client
-import logging
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ async def admin_panel(message: types.Message):
     with get_conn() as conn:
         users_count = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
         orders_count = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
-        revenue_toman = conn.execute("SELECT COALESCE(SUM(price_toman),0) as s FROM orders WHERE status='active' OR status='payment_received'").fetchone()["s"]
+        revenue_toman = conn.execute("SELECT COALESCE(SUM(price_toman),0) as s FROM orders WHERE status='paid' OR status='active' OR status='payment_received'").fetchone()["s"]
         total_gb = conn.execute("SELECT COALESCE(SUM(volume_gb),0) as s FROM services").fetchone()["s"]
     
     text = (
@@ -34,6 +35,10 @@ async def admin_panel(message: types.Message):
         f"📦 کل گیگ فروخته‌شده: **{total_gb:.1f} GB**\n\n"
         f"⚙️ **دستورات ادمین:**\n"
         f"`/admin` — این پنل\n"
+        f"`/order 5` — جزئیات سفارش (برای تطبیق کانفیگ با مشتری)\n"
+        f"`/deliver 5 لینک` — تحویل کانفیگ\n"
+        f"`/reply آیدی متن` — پاسخ به مشتری (بدون نیاز به یوزرنیم)\n"
+        f"`/backup` — بکاپ دیتابیس (تلگرام + گیت‌هاب)\n"
         f"`/total_volume` — کل فروش\n"
         f"`/broadcast پیام` — ارسال پیام به همه"
     )
@@ -107,7 +112,7 @@ async def _send_config_to_user(message: types.Message, order, vless_link: str):
         f"🔗 **لینک اتصال (VLESS):**\n`{vless_link}`\n\n"
         f"📦 حجم: {order['plan_gb']} گیگابایت\n\n"
         f"💡 *برای اتصال از اپ v2rayNG (اندروید) یا V2Box (آیفون) استفاده کنید.*\n\n"
-        f"✅ اگر پرداخت رو انجام دادید، دکمه «پرداخت انجام شد» رو بزنید.",
+        f"✅ اگر پرداخت رو انجام دادید، کانفیگ آماده استفاده است.",
         parse_mode="Markdown"
     )
     # Mark order as delivered
@@ -147,7 +152,7 @@ async def catch_delivery_link(message: types.Message):
         f"🔗 **لینک اتصال (VLESS):**\n`{vless_link}`\n\n"
         f"📦 حجم: {order['plan_gb']} گیگابایت\n\n"
         f"💡 *برای اتصال از اپ v2rayNG (اندروید) یا V2Box (آیفون) استفاده کنید.*\n\n"
-        f"✅ اگر پرداخت رو انجام دادید، دکمه «پرداخت انجام شد» رو بزنید.",
+        f"✅ اگر پرداخت رو انجام دادید، کانفیگ آماده استفاده است.",
         parse_mode="Markdown"
     )
     # Mark order as delivered
@@ -199,3 +204,96 @@ async def broadcast(message: types.Message):
             continue
     
     await message.answer(f"✅ پیام همگانی به {sent} کاربر ارسال شد (از {len(users)} کل).")
+
+
+@router.message(F.text == "/backup", F.from_user.id == ADMIN_ID)
+async def backup_now(message: types.Message):
+    """Admin: /backup — send DB backup to admin chat + GitHub now."""
+    await message.answer("📦 در حال گرفتن بکاپ... لطفاً چند لحظه صبر کنید.")
+    try:
+        from app.backup import send_backup_to_admin
+        msg = await send_backup_to_admin()
+        await message.answer(f"✅ {msg}")
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+        await message.answer(f"❌ بکاپ ناموفق بود: {type(e).__name__}")
+
+
+@router.message(F.text.startswith("/order "), F.from_user.id == ADMIN_ID)
+async def order_details(message: types.Message):
+    """Admin: /order <id> — show order details including customer identity for config matching."""
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip().isdigit():
+        await message.answer("فرمت: `/order 5`", parse_mode="Markdown")
+        return
+
+    order_id = int(parts[1].strip())
+    from app.database import get_conn
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE telegram_id=?", (order["telegram_id"],)).fetchone() if order else None
+
+    if not order:
+        await message.answer(f"❌ سفارش #{order_id} یافت نشد.")
+        return
+
+    username = f"@{user['username']}" if user and user["username"] else "—"
+    first = user["first_name"] if user else "—"
+    status_map = {
+        "pending": "🟡 در انتظار پرداخت",
+        "paid": "🟢 پرداخت تأیید شده",
+        "active": "✅ فعال",
+        "delivered": "📦 تحویل شده",
+        "cancelled": "❌ لغو شده",
+    }
+
+    text = (
+        f"🧾 **جزئیات سفارش #{order_id}**\n\n"
+        f"📦 حجم: {order['plan_gb']} گیگابایت\n"
+        f"⭐ قیمت: {order['price_stars']} استارز\n"
+        f"💵 معادل: {order['price_toman']:,} تومان\n"
+        f"📌 وضعیت: {status_map.get(order['status'], order['status'])}\n\n"
+        f"👤 مشتری: {first} ({username})\n"
+        f"🆔 آیدی: `{order['telegram_id']}`\n\n"
+        f"💡 *برای ساخت کانفیگ در پنل، اسم را `nexora_{order['id']}_{order['telegram_id']}` بگذارید تا همیشه مشخص باشد مال کیست.*\n\n"
+        f"⚙️ تحویل: `/deliver {order_id} لینک-vless`"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+
+@router.message(F.text.startswith("/reply "), F.from_user.id == ADMIN_ID)
+async def reply_to_user(message: types.Message):
+    """Admin: /reply <user_id> <text> — reply to a customer directly, no username needed."""
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "📩 **پاسخ به مشتری**\n\n"
+            "فرمت: `/reply {آیدی کاربر} {متن پاسخ}`\n\n"
+            "مثال:\n`/reply 5860341769 سلام، مشکل شما بررسی شد و حل شد ✅`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    user_id_str = parts[1].strip()
+    if not user_id_str.isdigit():
+        await message.answer("❌ آیدی کاربر باید عدد باشد (همون عددی که در تیکت اومده).")
+        return
+    
+    user_id = int(user_id_str)
+    reply_text = parts[2].strip()
+    
+    from app.instances import bot
+    try:
+        await bot.send_message(
+            user_id,
+            f"💬 **پاسخ پشتیبانی NEXORA**\n\n{reply_text}\n\n"
+            f"📩 اگر سوال دیگری دارید، از «📩 گزارش مشکل / پشتیبانی» پیام دهید.",
+            parse_mode="Markdown"
+        )
+        await message.answer(f"✅ پاسخ به کاربر `{user_id}` ارسال شد.")
+    except Exception as e:
+        logger.error(f"Reply failed: {e}")
+        await message.answer(
+            f"❌ ارسال پاسخ ممکن نشد. احتمالاً کاربر ربات را بلاک کرده یا شروع نکرده است.\n"
+            f"خطا: {type(e).__name__}"
+        )

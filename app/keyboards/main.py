@@ -19,7 +19,7 @@ def plans_keyboard():
 
 def payment_methods_keyboard(order_id: int, stars_amount: int):
     kb = [
-        [InlineKeyboardButton(text=f"⭐️ پرداخت اعتباری {stars_amount} استارز (تحویل آنی)", callback_data=f"pay_stars_{order_id}")],
+        [InlineKeyboardButton(text=f"⭐️ پرداخت با استارز ({stars_amount} ⭐)", callback_data=f"pay_stars_{order_id}")],
         [InlineKeyboardButton(text="🔄 وضعیت پرداخت و فعال‌سازی", callback_data=f"check_pay_{order_id}")],
         [InlineKeyboardButton(text="❌ لغو سفارش", callback_data=f"cancel_order_{order_id}")]
     ]
