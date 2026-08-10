@@ -3,12 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "nexorasup_bot")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip("'\" \t\r\n")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "nexorasup_bot").strip("'\" \t\r\n@")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0").strip("'\" \t\r\n") or "0")
 
-SULGX_URL = os.getenv("SULGX_URL", "https://web-production-267e1.up.railway.app").rstrip("/")
-SULGX_PASSWORD = os.getenv("SULGX_PASSWORD", "admin")
+SULGX_URL = os.getenv("SULGX_URL", "https://web-production-267e1.up.railway.app").strip("'\" \t\r\n").rstrip("/")
+SULGX_PASSWORD = os.getenv("SULGX_PASSWORD", "admin").strip("'\" \t\r\n")
 
 STARZ_BOT_USERNAME = os.getenv("STARZ_BOT_USERNAME", "@StarzFaBot")
 DB_PATH = os.getenv("DB_PATH", "/data/workspace/nexora-bot/nexora.db")
