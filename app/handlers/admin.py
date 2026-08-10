@@ -103,7 +103,7 @@ async def catch_delivery_link(message: types.Message):
         return
     
     user_id = order["telegram_id"]
-    from bot import bot
+    from app.instances import bot
     await bot.send_message(
         user_id,
         f"🚀 **کانفیگ شما آماده است!**\n\n"

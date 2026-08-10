@@ -130,7 +130,7 @@ def create_service(order_id, telegram_id, uuid, label, volume_gb, subscription_u
                 from app import config
                 async def notify_admin():
                     try:
-                        from bot import bot
+                        from app.instances import bot
                         await bot.send_message(
                             config.ADMIN_ID,
                             f"🎉 **تبریک! مجموع فروش به ۱۰۰ گیگابایت رسید!** 🚀\n\n"

@@ -65,7 +65,7 @@ async def handle_buy_plan(callback: types.CallbackQuery):
 
 async def _notify_admin(callback: types.CallbackQuery, order_id: int, plan: dict):
     """Send order notification to the admin (owner) for manual config creation."""
-    from bot import bot
+    from app.instances import bot
     user = callback.from_user
     username = f"@{user.username}" if user.username else "—"
     

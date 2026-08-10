@@ -1,9 +1,9 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
 
 from app import config
+from app.instances import bot, dp
 from app.scheduler import start_scheduler
 from app.handlers import start, test, shop, payment, service, support, admin
 
@@ -25,9 +25,6 @@ def _validate_config():
         raise SystemExit("\n".join(["❌ CONFIG ERRORS (fix these in Railway Variables):"] + [f"  • {e}" for e in errors]))
 
 _validate_config()
-
-bot = Bot(token=config.BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
 
 dp.include_router(start.router)
 dp.include_router(test.router)

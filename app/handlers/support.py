@@ -41,7 +41,7 @@ async def handle_ticket_message(message: types.Message, state: FSMContext):
     
     # Notify admin
     try:
-        from bot import bot
+        from app.instances import bot
         await bot.send_message(
             config.ADMIN_ID,
             f"🎫 **تیکت جدید #{ticket_id}**\n\n"

@@ -6,7 +6,7 @@ scheduler = AsyncIOScheduler()
 
 async def _deactivate_unpaid(order_id: int, uuid: str):
     from app.services.sulgx import sulgx_client
-    from bot import bot
+    from app.instances import bot
     from app import config
 
     order = database.get_order(order_id)
