@@ -1,7 +1,6 @@
 from aiogram import Router, F, types
 from app import database, config
 from app.keyboards.main import plans_keyboard, payment_methods_keyboard
-from app.services.sulgx import sulgx_client
 import logging
 
 router = Router()
@@ -40,65 +39,52 @@ async def handle_buy_plan(callback: types.CallbackQuery):
         f"💎 تخفیف: **{plan['discount']}%**\n"
         f"💵 قیمت: **{plan['price_toman']:,} تومان**\n"
         f"⭐ معادل: **{plan['stars']} استارز**\n\n"
-        f"🎁 **سرویس شما پیش از پرداخت ساخته شد!**\n"
-        f"1️⃣ کانفیگ در پیام بعدی ارسال می‌شود ✨\n"
-        f"2️⃣ **۵ دقیقه** فرصت دارید مبلغ استارز را پرداخت کنید.\n"
-        f"3️⃣ در صورت عدم پرداخت تا ۵ دقیقه، سرویس خودکار غیرفعال می‌شود."
+        f"⏳ **کانفیگ شما در حال آماده‌سازی است** (معمولاً چند دقیقه).\n"
+        f"پس از آماده شدن، لینک اتصال همین‌جا ارسال می‌شود.\n\n"
+        f"💳 *برای تکمیل خرید، مبلغ {plan['stars']} استارز را پرداخت کرده و دکمه پرداخت را بزنید.*"
     )
     await callback.message.edit_text(text, parse_mode="Markdown")
     
-    # 1. Create link on SulgX panel immediately
-    label = "NEXORA VIP - 24-7 Support - nexorasup_bot"
-    res = await sulgx_client.create_link(label=label, limit_gb=plan["gb"])
+    # Notify admin about the new order
+    await _notify_admin(callback, order_id, plan)
     
-    if not res:
-        await callback.message.answer(
-            "❌ متأسفانه در ساخت کانفیگ روی سرور خطایی رخ داد.\n"
-            "لطفاً دقایقی دیگر دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
-        )
-        database.set_order_status(order_id, "failed")
-        return
-
-    vless_link = res.get("vless_link", "")
-    sub_url = res.get("subscription_url", "")
-    uuid = res.get("uuid", "")
-    
-    # 2. Store service in database
-    database.create_service(
-        order_id=order_id,
-        telegram_id=callback.from_user.id,
-        uuid=uuid,
-        label=label,
-        volume_gb=plan["gb"],
-        subscription_url=sub_url,
-        vless_link=vless_link,
-        expires_at=None
-    )
-    
-    # 3. Deliver config immediately
-    delivery_text = (
-        f"🚀 **کانفیگ شما آماده و تحویل شد!**\n\n"
-        f"🔗 **لینک اتصال (VLESS):**\n"
-        f"`{vless_link}`\n\n"
-        f"📊 حجم: {plan['gb']} گیگابایت\n\n"
-        f"💡 *توصیه:* بهتر است بسته خود را برای **۳۰ روز** استفاده کنید. اگر قبل از ۳۰ روز حجم تمام شد، نگران نباشید — به بخش پشتیبانی اطلاع دهید تا کانفیگ جدید متناسب با حجم باقی‌مانده دریافت کنید.*\n\n"
-        f"💳 *برای فعال‌سازی دائمی، لطفاً پرداخت {plan['stars']} استارز را تکمیل کنید.*"
-    )
-    await callback.message.answer(delivery_text, parse_mode="Markdown")
-    
-    # 4. Payment button
+    # Payment buttons
     pm_kb = payment_methods_keyboard(order_id, plan["stars"])
     await callback.message.answer(
-        f"💳 **درگاه پرداخت استارز (مهلت: ۵ دقیقه)**\n\n"
+        f"💳 **درگاه پرداخت استارز**\n\n"
         f"سفارش #{order_id} | {plan['gb']} گیگابایت\n"
-        f"مبلغ قابل پرداخت: **{plan['stars']} استارز**",
+        f"مبلغ قابل پرداخت: **{plan['stars']} استارز**\n\n"
+        f"1️⃣ استارز را از منابع معتبر تهیه کنید\n"
+        f"2️⃣ پرداخت را انجام دهید\n"
+        f"3️⃣ دکمه «پرداخت انجام شد» را بزنید\n"
+        f"4️⃣ ادمین کانفیگ را برای شما ارسال می‌کند",
         reply_markup=pm_kb, parse_mode="Markdown"
     )
     await callback.answer()
+
+
+async def _notify_admin(callback: types.CallbackQuery, order_id: int, plan: dict):
+    """Send order notification to the admin (owner) for manual config creation."""
+    from bot import bot
+    user = callback.from_user
+    username = f"@{user.username}" if user.username else "—"
     
-    # 5. Schedule 5-minute timeout deactivation
-    from app.scheduler import schedule_payment_timeout
-    schedule_payment_timeout(order_id, uuid)
+    text = (
+        f"🛒 **سفارش جدید #{order_id}**\n\n"
+        f"👤 کاربر: {user.first_name}\n"
+        f"🆔 آیدی: `{user.id}`\n"
+        f"📛 یوزرنیم: {username}\n"
+        f"📦 حجم: {plan['gb']} گیگابایت\n"
+        f"⭐ قیمت: {plan['stars']} استارز\n"
+        f"💵 معادل: {plan['price_toman']:,} تومان\n\n"
+        f"⚙️ **برای تحویل:** کانفیگ را بسازید و دستور زیر را بزنید:\n"
+        f"`/deliver {order_id}`\n"
+        f"سپس لینک VLESS را ارسال کنید."
+    )
+    try:
+        await bot.send_message(config.ADMIN_ID, text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Admin notify failed: {e}")
 
 
 @router.callback_query(F.data == "cancel_action")

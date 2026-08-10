@@ -39,6 +39,89 @@ async def admin_panel(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
+@router.message(F.text.startswith("/deliver "), F.from_user.id == ADMIN_ID)
+async def deliver_config(message: types.Message):
+    """Admin command: /deliver <order_id> then sends the VLESS link in next message"""
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("فرمت: `/deliver {order_id}`\nمثال: `/deliver 5`", parse_mode="Markdown")
+        return
+    
+    order_id_str = parts[1].strip()
+    if not order_id_str.isdigit():
+        await message.answer("❌ شناسه سفارش باید عدد باشد.")
+        return
+    
+    order_id = int(order_id_str)
+    order = None
+    from app.database import get_conn
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    
+    if not order:
+        await message.answer(f"❌ سفارش #{order_id} یافت نشد.")
+        return
+    
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.state import StatesGroup, State
+    
+    # Store pending delivery in memory for next message
+    # Simple approach: save order id for the next message handler
+    await message.answer(
+        f"🛠 **کانفیگ برای سفارش #{order_id}**\n"
+        f"کاربر: `{order['telegram_id']}` | {order['plan_gb']} گیگابایت\n\n"
+        f"حالا **لینک VLESS** را بفرستید تا برای کاربر ارسال شود.\n"
+        f"(یا /cancel_delivery برای انصراف)",
+        parse_mode="Markdown"
+    )
+    # Store in a module-level dict
+    _pending_deliveries[message.from_user.id] = order_id
+
+_pending_deliveries: dict = {}
+
+
+@router.message(F.from_user.id == ADMIN_ID)
+async def catch_delivery_link(message: types.Message):
+    """If admin sends a link right after /deliver, send it to the user"""
+    admin_id = message.from_user.id
+    if admin_id not in _pending_deliveries:
+        return
+    
+    order_id = _pending_deliveries.pop(admin_id)
+    vless_link = message.text.strip() if message.text else ""
+    
+    if not vless_link.startswith(("vless://", "vmess://", "trojan://", "ss://", "hysteria://")):
+        await message.answer("⚠️ این لینک معتبر به نظر نمی‌رسد. لینک شروع‌شونده با vless:// بفرستید.")
+        return
+    
+    from app.database import get_conn
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    
+    if not order:
+        await message.answer("❌ سفارش یافت نشد.")
+        return
+    
+    user_id = order["telegram_id"]
+    from bot import bot
+    await bot.send_message(
+        user_id,
+        f"🚀 **کانفیگ شما آماده است!**\n\n"
+        f"🔗 **لینک اتصال (VLESS):**\n`{vless_link}`\n\n"
+        f"📦 حجم: {order['plan_gb']} گیگابایت\n\n"
+        f"💡 *توصیه:* بهتر است بسته خود را برای **۳۰ روز** استفاده کنید. اگر قبل از ۳۰ روز حجم تمام شد، به پشتیبانی اطلاع دهید.*\n\n"
+        f"✅ اگر پرداخت را انجام داده‌اید، از دکمه «پرداخت انجام شد» استفاده کنید تا سرویس ثبت شود.",
+        parse_mode="Markdown"
+    )
+    await message.answer(f"✅ کانفیگ برای سفارش #{order_id} ارسال شد!")
+
+
+@router.message(F.from_user.id == ADMIN_ID, F.text == "/cancel_delivery")
+async def cancel_delivery(message: types.Message):
+    _pending_deliveries.pop(message.from_user.id, None)
+    await message.answer("انصراف از تحویل. سفارش دستی قابل مدیریت است.")
+
+
 @router.message(F.text == "/total_volume", F.from_user.id == ADMIN_ID)
 async def total_volume(message: types.Message):
     total_gb = database.total_sold_gb_all()
